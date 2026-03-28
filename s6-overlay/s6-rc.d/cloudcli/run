@@ -1,3 +1,0 @@
-#!/bin/sh
-cd /workspace
-exec s6-setuidgid claude env HOME=/home/claude NODE_OPTIONS=--no-deprecation WORKSPACES_ROOT=/workspace claude-code-ui --port 3001

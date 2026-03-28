@@ -1,3 +1,0 @@
-#!/bin/sh
-cd /workspace
-exec with-contenv s6-setuidgid claude env HOME=/home/claude /usr/local/bin/gsd-web.sh
