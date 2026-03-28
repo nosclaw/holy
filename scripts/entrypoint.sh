@@ -138,15 +138,58 @@ echo "[entrypoint] Initialized skillshare config"
 # ---------- CloudCLI: ensure plugins exist in persistent volume ----------
 CLOUDCLI_DIR="$CLAUDE_HOME/.claude-code-ui"
 CLOUDCLI_SRC="/usr/local/share/holyclaude/cloudcli-plugins"
+
+# Ensure plugins directory exists
+mkdir -p "$CLOUDCLI_DIR/plugins"
+
+# Initialize official plugins if not present
 if [ ! -f "$CLOUDCLI_DIR/plugins.json" ]; then
-    echo "[entrypoint] Initializing CloudCLI plugins in persistent volume..."
-    mkdir -p "$CLOUDCLI_DIR"
+    echo "[entrypoint] Initializing official CloudCLI plugins..."
     if [ -d "$CLOUDCLI_SRC" ]; then
-        cp -r "$CLOUDCLI_SRC/plugins" "$CLOUDCLI_DIR/"
-        cp "$CLOUDCLI_SRC/plugins.json" "$CLOUDCLI_DIR/"
+        cp -r "$CLOUDCLI_SRC/plugins"/* "$CLOUDCLI_DIR/plugins/"
+        cp "$CLOUDCLI_SRC/plugins.json" "$CLOUDCLI_DIR/plugins.json"
+    else
+        echo '{"project-stats":{"name":"project-stats","source":"https://github.com/cloudcli-ai/cloudcli-plugin-starter","enabled":true},"web-terminal":{"name":"web-terminal","source":"https://github.com/cloudcli-ai/cloudcli-plugin-terminal","enabled":true}}' > "$CLOUDCLI_DIR/plugins.json"
     fi
     chown -R "$PUID:$PGID" "$CLOUDCLI_DIR"
 fi
+
+# --- Dynamic GSD plugin integration ---
+# Example: GSD_PLUGIN_REPO=https://github.com/nosclaw/holy.git
+#          GSD_PLUGIN_SUBDIR=plugins/cloudcli-plugin-gsd
+if [ -n "$GSD_PLUGIN_REPO" ]; then
+    GSD_TARGET_DIR="$CLOUDCLI_DIR/plugins/gsd-agent"
+    echo "[entrypoint] Dynamic GSD plugin requested from $GSD_PLUGIN_REPO"
+    
+    # Clone or update
+    if [ ! -d "$GSD_TARGET_DIR/.git" ]; then
+        rm -rf "$GSD_TARGET_DIR"
+        echo "[entrypoint] Cloning GSD plugin..."
+        runuser -u "$CLAUDE_USER" -- git clone --depth 1 "$GSD_PLUGIN_REPO" "$GSD_TARGET_DIR"
+    else
+        echo "[entrypoint] Updating GSD plugin..."
+        cd "$GSD_TARGET_DIR" && runuser -u "$CLAUDE_USER" -- git pull --depth 1
+    fi
+
+    # Build if needed (only if package.json exists in target or subdir)
+    cd "$GSD_TARGET_DIR"
+    if [ -n "$GSD_PLUGIN_SUBDIR" ] && [ -d "$GSD_PLUGIN_SUBDIR" ]; then
+        cd "$GSD_PLUGIN_SUBDIR"
+    fi
+
+    if [ -f "package.json" ]; then
+        echo "[entrypoint] Building GSD plugin..."
+        runuser -u "$CLAUDE_USER" -- npm install --silent
+        runuser -u "$CLAUDE_USER" -- npm run build --silent
+        
+        # Ensure it's enabled in plugins.json
+        if ! grep -q "gsd-agent" "$CLOUDCLI_DIR/plugins.json"; then
+            jq '. + {"gsd-agent":{"name":"gsd-agent","source":"local","enabled":true}}' "$CLOUDCLI_DIR/plugins.json" > "$CLOUDCLI_DIR/plugins.json.tmp" && \
+            mv "$CLOUDCLI_DIR/plugins.json.tmp" "$CLOUDCLI_DIR/plugins.json"
+        fi
+    fi
+fi
+chown -R "$PUID:$PGID" "$CLOUDCLI_DIR"
 
 # ---------- Ensure DISPLAY is set ----------
 export DISPLAY=:99

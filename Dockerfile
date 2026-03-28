@@ -162,16 +162,14 @@ RUN curl -fsSL https://raw.githubusercontent.com/runkids/skillshare/main/install
 RUN npm i -g @siteboon/claude-code-ui
 RUN touch /usr/local/lib/node_modules/@siteboon/claude-code-ui/.env
 
-# ---------- CloudCLI plugins (baked into image) ----------
+# ---------- CloudCLI plugins (pre-installed official plugins) ----------
 USER claude
-COPY --chown=claude:claude plugins/cloudcli-plugin-gsd /home/claude/.claude-code-ui/plugins/gsd-agent
 RUN mkdir -p /home/claude/.claude-code-ui/plugins && \
     git clone --depth 1 https://github.com/cloudcli-ai/cloudcli-plugin-starter.git /home/claude/.claude-code-ui/plugins/project-stats && \
     cd /home/claude/.claude-code-ui/plugins/project-stats && npm install && npm run build && \
     git clone --depth 1 https://github.com/cloudcli-ai/cloudcli-plugin-terminal.git /home/claude/.claude-code-ui/plugins/web-terminal && \
     cd /home/claude/.claude-code-ui/plugins/web-terminal && npm install && npm run build && \
-    cd /home/claude/.claude-code-ui/plugins/gsd-agent && npm install && npm run build && \
-    echo '{"project-stats":{"name":"project-stats","source":"https://github.com/cloudcli-ai/cloudcli-plugin-starter","enabled":true},"web-terminal":{"name":"web-terminal","source":"https://github.com/cloudcli-ai/cloudcli-plugin-terminal","enabled":true},"gsd-agent":{"name":"gsd-agent","source":"local","enabled":true}}' > /home/claude/.claude-code-ui/plugins.json
+    echo '{"project-stats":{"name":"project-stats","source":"https://github.com/cloudcli-ai/cloudcli-plugin-starter","enabled":true},"web-terminal":{"name":"web-terminal","source":"https://github.com/cloudcli-ai/cloudcli-plugin-terminal","enabled":true}}' > /home/claude/.claude-code-ui/plugins.json
 USER root
 # Stage plugins for entrypoint to copy into persistent volume
 RUN mkdir -p /usr/local/share/holyclaude/cloudcli-plugins && \

@@ -67,6 +67,10 @@ services:
       - GSD_DOMAIN=${GSD_DOMAIN}
       - GSD_HOST_PORT=${GSD_HOST_PORT:-3002}
 
+      # --- Dynamic GSD Plugin Integration ---
+      - GSD_PLUGIN_REPO=${GSD_PLUGIN_REPO:-}
+      - GSD_PLUGIN_SUBDIR=${GSD_PLUGIN_SUBDIR:-}
+
       # --- Cloudflare Tunnel (auto-expose dev ports as subdomains) ---
       # - CF_TUNNEL_TOKEN=                             # Tunnel token from Cloudflare Zero Trust dashboard
       # - CF_TUNNEL_DOMAIN=dev.example.com             # Base domain suffix for subdomains
