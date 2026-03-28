@@ -76,6 +76,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       > /etc/apt/sources.list.d/github-cli.list && \
     apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
 
+# ---------- Cloudflared (Cloudflare Tunnel) ----------
+RUN CF_ARCH=$(case "$TARGETARCH" in arm64) echo "arm64";; *) echo "amd64";; esac) && \
+    curl -fsSL -o /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" && \
+    chmod +x /usr/local/bin/cloudflared
+
 # ---------- bat symlink (Debian names it batcat) ----------
 RUN ln -sf /usr/bin/batcat /usr/local/bin/bat 2>/dev/null || true
 
@@ -101,6 +107,7 @@ ENV PATH="/home/claude/.local/bin:${PATH}"
 RUN npm i -g \
     typescript tsx \
     pnpm \
+    bun \
     vite esbuild \
     eslint prettier \
     serve nodemon concurrently \
@@ -141,10 +148,15 @@ RUN if [ "$VARIANT" = "full" ]; then \
     fi
 
 # ---------- AI CLI providers ----------
-RUN npm i -g @google/gemini-cli @openai/codex task-master-ai
+RUN npm i -g @google/gemini-cli @openai/codex task-master-ai gsd-pi && \
+    cd /usr/local/lib/node_modules/gsd-pi/dist/web/standalone && \
+    npm install node-pty
 USER claude
 RUN curl -fsSL https://cursor.com/install | bash
 USER root
+
+# ---------- Skillshare (skill sync across AI CLIs) ----------
+RUN curl -fsSL https://raw.githubusercontent.com/runkids/skillshare/main/install.sh | sh
 
 # ---------- CloudCLI (web UI for Claude Code) ----------
 RUN npm i -g @siteboon/claude-code-ui
@@ -152,13 +164,19 @@ RUN touch /usr/local/lib/node_modules/@siteboon/claude-code-ui/.env
 
 # ---------- CloudCLI plugins (baked into image) ----------
 USER claude
+COPY --chown=claude:claude plugins/cloudcli-plugin-gsd /home/claude/.claude-code-ui/plugins/gsd-agent
 RUN mkdir -p /home/claude/.claude-code-ui/plugins && \
     git clone --depth 1 https://github.com/cloudcli-ai/cloudcli-plugin-starter.git /home/claude/.claude-code-ui/plugins/project-stats && \
     cd /home/claude/.claude-code-ui/plugins/project-stats && npm install && npm run build && \
     git clone --depth 1 https://github.com/cloudcli-ai/cloudcli-plugin-terminal.git /home/claude/.claude-code-ui/plugins/web-terminal && \
     cd /home/claude/.claude-code-ui/plugins/web-terminal && npm install && npm run build && \
-    echo '{"project-stats":{"name":"project-stats","source":"https://github.com/cloudcli-ai/cloudcli-plugin-starter","enabled":true},"web-terminal":{"name":"web-terminal","source":"https://github.com/cloudcli-ai/cloudcli-plugin-terminal","enabled":true}}' > /home/claude/.claude-code-ui/plugins.json
+    cd /home/claude/.claude-code-ui/plugins/gsd-agent && npm install && npm run build && \
+    echo '{"project-stats":{"name":"project-stats","source":"https://github.com/cloudcli-ai/cloudcli-plugin-starter","enabled":true},"web-terminal":{"name":"web-terminal","source":"https://github.com/cloudcli-ai/cloudcli-plugin-terminal","enabled":true},"gsd-agent":{"name":"gsd-agent","source":"local","enabled":true}}' > /home/claude/.claude-code-ui/plugins.json
 USER root
+# Stage plugins for entrypoint to copy into persistent volume
+RUN mkdir -p /usr/local/share/holyclaude/cloudcli-plugins && \
+    cp -r /home/claude/.claude-code-ui/plugins /usr/local/share/holyclaude/cloudcli-plugins/plugins && \
+    cp /home/claude/.claude-code-ui/plugins.json /usr/local/share/holyclaude/cloudcli-plugins/plugins.json
 
 # ---------- Store variant for bootstrap ----------
 RUN echo "${VARIANT}" > /etc/holyclaude-variant
@@ -167,22 +185,34 @@ RUN echo "${VARIANT}" > /etc/holyclaude-variant
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/bootstrap.sh /usr/local/bin/bootstrap.sh
 COPY scripts/notify.py /usr/local/bin/notify.py
+COPY scripts/gsd-web.sh /usr/local/bin/gsd-web.sh
+COPY scripts/tunnel-manager.sh /usr/local/bin/tunnel-manager.sh
 COPY config/settings.json /usr/local/share/holyclaude/settings.json
 COPY config/claude-memory-full.md /usr/local/share/holyclaude/claude-memory-full.md
 COPY config/claude-memory-slim.md /usr/local/share/holyclaude/claude-memory-slim.md
 RUN chmod +x /usr/local/bin/entrypoint.sh \
     /usr/local/bin/bootstrap.sh \
-    /usr/local/bin/notify.py
+    /usr/local/bin/notify.py \
+    /usr/local/bin/gsd-web.sh \
+    /usr/local/bin/tunnel-manager.sh
 
 # ---------- s6-overlay service definitions ----------
 COPY s6-overlay/s6-rc.d/cloudcli/type /etc/s6-overlay/s6-rc.d/cloudcli/type
 COPY s6-overlay/s6-rc.d/cloudcli/run /etc/s6-overlay/s6-rc.d/cloudcli/run
 COPY s6-overlay/s6-rc.d/xvfb/type /etc/s6-overlay/s6-rc.d/xvfb/type
 COPY s6-overlay/s6-rc.d/xvfb/run /etc/s6-overlay/s6-rc.d/xvfb/run
+COPY s6-overlay/s6-rc.d/gsd-web/type /etc/s6-overlay/s6-rc.d/gsd-web/type
+COPY s6-overlay/s6-rc.d/gsd-web/run /etc/s6-overlay/s6-rc.d/gsd-web/run
+COPY s6-overlay/s6-rc.d/tunnel/type /etc/s6-overlay/s6-rc.d/tunnel/type
+COPY s6-overlay/s6-rc.d/tunnel/run /etc/s6-overlay/s6-rc.d/tunnel/run
 RUN chmod +x /etc/s6-overlay/s6-rc.d/cloudcli/run \
-    /etc/s6-overlay/s6-rc.d/xvfb/run && \
+    /etc/s6-overlay/s6-rc.d/xvfb/run \
+    /etc/s6-overlay/s6-rc.d/gsd-web/run \
+    /etc/s6-overlay/s6-rc.d/tunnel/run && \
     touch /etc/s6-overlay/s6-rc.d/user/contents.d/cloudcli && \
-    touch /etc/s6-overlay/s6-rc.d/user/contents.d/xvfb
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/xvfb && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/gsd-web && \
+    touch /etc/s6-overlay/s6-rc.d/user/contents.d/tunnel
 
 # ---------- Working directory ----------
 WORKDIR /workspace

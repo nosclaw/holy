@@ -6,6 +6,7 @@
 
 services:
   holyclaude:
+    build: .
     image: coderluii/holyclaude:latest
     container_name: holyclaude
     hostname: holyclaude
@@ -18,7 +19,8 @@ services:
     security_opt:
       - seccomp=unconfined
     ports:
-      - "${HOLYCLAUDE_HOST_PORT:-3001}:3001"   # CloudCLI web UI
+      - "${HOLYCLAUDE_HOST_PORT:-3001}:3001"   # CloudCLI web UI (via gateway)
+      - "${GSD_HOST_PORT:-3002}:3003"          # GSD Web UI (proxy → internal 3002)
       # --- Uncomment ports as needed ---
       # - "3000:3000"         # Dev server (Next.js, Express)
       # - "4321:4321"         # Astro dev
@@ -27,13 +29,22 @@ services:
       # - "9229:9229"         # Node.js debugger
     volumes:
       - ${HOLYCLAUDE_HOST_CLAUDE_DIR:-./data/claude}:/home/claude/.claude
+      - ${HOLYCLAUDE_HOST_CLOUDCLI_DIR:-.storage/cloudcli}/ui:/home/claude/.claude-code-ui
+      - ${HOLYCLAUDE_HOST_CLOUDCLI_DIR:-.storage/cloudcli}/auth:/home/claude/.cloudcli
       - ${HOLYCLAUDE_HOST_WORKSPACE_DIR:-./workspace}:/workspace
+      # --- Host config (read-only staging, copied at boot by entrypoint) ---
+      - ~/.claude.json:/mnt/host-claude.json:ro                              # Claude Code auth
+      - ~/.gsd:/mnt/host-gsd:ro                                              # GSD config
+      - ~/.codex:/mnt/host-codex:ro                                          # OpenAI Codex auth
+      - ~/.gemini:/mnt/host-gemini:ro                                        # Gemini auth
+      # --- GSD projects (persistent across restarts) ---
+      - ${HOLYCLAUDE_HOST_GSD_PROJECTS_DIR:-.storage/gsd/projects}:/home/claude/.gsd/projects
     environment:
       # --- Required ---
-      - TZ=UTC                                    # Your timezone (e.g., America/New_York)
+      - TZ=UTC+8                                    # Your timezone (e.g., America/New_York)
 
       # --- Performance ---
-      - NODE_OPTIONS=--max-old-space-size=4096     # Node.js memory limit (MB)
+      - NODE_OPTIONS=--max-old-space-size=8192     # Node.js memory limit (MB)
 
       # --- User mapping (match your host UID/GID) ---
       - PUID=1000
@@ -51,6 +62,15 @@ services:
       # - NOTIFY_EMAIL=mailto://user:pass@gmail.com?to=you@gmail.com
       # - NOTIFY_GOTIFY=gotify://hostname/token
       # - NOTIFY_URLS=                                   # catch-all: comma-separated Apprise URLs
+
+      # --- GSD Web UI (used by the GSD plugin to build links) ---
+      - GSD_DOMAIN=${GSD_DOMAIN}
+      - GSD_HOST_PORT=${GSD_HOST_PORT:-3002}
+
+      # --- Cloudflare Tunnel (auto-expose dev ports as subdomains) ---
+      # - CF_TUNNEL_TOKEN=                             # Tunnel token from Cloudflare Zero Trust dashboard
+      # - CF_TUNNEL_DOMAIN=dev.example.com             # Base domain suffix for subdomains
+      # - CF_TUNNEL_PORTS=3000:app,5173:vite,8787:wrangler  # Custom port:name mappings (optional)
 
       # --- AI provider API keys (optional — can also set via web UI) ---
       # - GEMINI_API_KEY=

@@ -20,7 +20,7 @@
 
 ### Stop configuring. Start building.
 
-One command. Full AI development workstation. Claude Code, web UI, headless browser, 5 AI CLIs, 50+ dev tools — containerized and ready.
+One command. Full AI development workstation. Claude Code, web UI, headless browser, 6 AI CLIs, 50+ dev tools — containerized and ready.
 
 **You were going to spend 2 hours setting this up manually. Or you could just `docker compose up`.**
 
@@ -156,7 +156,7 @@ So I made a container that does all of it. And then I hit every possible bug so 
 | **Claude Code** | Pre-installed, pre-configured, ready | Install, configure, debug installer hanging, fix WORKDIR |
 | **Web UI** | CloudCLI included with plugins | Find a web UI, install it, configure it, wire it to Claude |
 | **Headless browser** | Chromium + Xvfb + Playwright, configured | Install Chromium, install Xvfb, configure display :99, fix shm, fix sandbox, fix seccomp... |
-| **AI CLIs** | 5 providers, one container | Install each one separately across 3 package managers |
+| **AI CLIs** | 6 providers, one container | Install each one separately across 3 package managers |
 | **Dev tools** | 50+ tools, ready | `apt-get install` / `npm i -g` / `pip install` for the next hour |
 | **Process management** | s6-overlay (auto-restart, graceful shutdown) | Write your own supervisord config or hope Docker restart works |
 | **Persistence** | Bind mounts, credentials survive everything | Figure out Docker volumes, debug "why is this a directory not a file" |
@@ -197,6 +197,7 @@ HolyClaude runs the **official Claude Code CLI** from Anthropic. Your existing a
 | OpenAI Codex | OpenAI API key (`OPENAI_API_KEY`) — separate from ChatGPT subscription |
 | Cursor | Cursor API key (`CURSOR_API_KEY`) |
 | TaskMaster AI | Uses your AI provider keys (Anthropic, OpenAI, etc.) |
+| GSD | Uses your AI provider keys (Anthropic, OpenAI, etc.) — [gsd-build/gsd-2](https://github.com/gsd-build/gsd-2) |
 
 > **HolyClaude is free and open source.** You only pay your AI providers for usage, same as you already do. We don't proxy, intercept, or touch your credentials. They live in your local bind mount.
 
@@ -425,7 +426,7 @@ These values are read by Docker Compose on the host. They are not container envi
 | **User mapping** | File permissions between container and host | If you get "permission denied" (`id -u` and `id -g` on your host) |
 | **SMB/CIFS** | File watcher polling mode | Only if your volumes live on a NAS or network share |
 | **Notifications** | Push alerts via Apprise (Discord, Telegram, Slack, Email, 100+ services) | If you want to walk away and know when Claude is done |
-| **AI providers** | API keys for Gemini, Codex, Cursor | If you want to use AI CLIs other than Claude |
+| **AI providers** | API keys for Gemini, Codex, Cursor, GSD | If you want to use AI CLIs other than Claude |
 
 > **Every single environment variable is optional.** The container runs perfectly with just `TZ=UTC`. Everything else has sensible defaults or is handled through the web UI.
 
@@ -533,8 +534,9 @@ This is not a minimal container. This is an entire development workstation.
 | **OpenAI Codex** | `codex` | OpenAI's coding agent |
 | **Cursor** | `cursor` | Cursor's AI agent |
 | **TaskMaster AI** | `task-master` | Task planning and orchestration |
+| **GSD** | `gsd` | Spec-driven autonomous coding agent ([gsd-build/gsd-2](https://github.com/gsd-build/gsd-2)) |
 
-Five AI CLIs. One container. Switch between them instantly. No other Docker image does this.
+Six AI CLIs. One container. Switch between them instantly. No other Docker image does this.
 
 </details>
 
@@ -595,7 +597,7 @@ The full image includes everything above, plus:
 
 ## :robot: AI CLI Providers
 
-Five AI CLIs. One container. No other Docker image gives you this.
+Six AI CLIs. One container. No other Docker image gives you this.
 
 | Provider | Command | How to authenticate | Subscription works? |
 |----------|---------|--------------------|--------------------|
@@ -604,6 +606,7 @@ Five AI CLIs. One container. No other Docker image gives you this.
 | **OpenAI Codex** | `codex` | `OPENAI_API_KEY` env var | API key only — ChatGPT Plus does NOT work |
 | **Cursor** | `cursor` | `CURSOR_API_KEY` env var | API key |
 | **TaskMaster AI** | `task-master` | Uses existing AI provider keys | Works with configured keys |
+| **GSD** | `gsd` | Uses existing AI provider keys | Works with configured keys |
 
 > Claude Code is the primary CLI. The others are there because sometimes you want a second opinion, or a specific model's strengths, or you're comparing outputs. Having all of them one `Tab` away is the whole point.
 

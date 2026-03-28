@@ -1,0 +1,13 @@
+{
+  "name": "gsd-agent",
+  "displayName": "GSD",
+  "version": "1.0.0",
+  "description": "GSD (Get Shit Done) autonomous coding agent — spec-driven development",
+  "author": "HolyClaude",
+  "icon": "Terminal",
+  "type": "module",
+  "slot": "tab",
+  "entry": "dist/index.js",
+  "server": "dist/server.js",
+  "permissions": []
+}

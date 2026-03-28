@@ -2,6 +2,9 @@
 data/
 workspace/*
 !workspace/.gitkeep
+.storage/data
+.storage/workspace
+.storage/gsd
 
 # Environment files with secrets
 .env

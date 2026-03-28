@@ -115,6 +115,7 @@ These take longer to install (~1-2 minutes) because they require system dependen
 | **OpenAI Codex** | `codex` | Requires `OPENAI_API_KEY` env var |
 | **Cursor** | `cursor` | Requires `CURSOR_API_KEY` env var |
 | **TaskMaster AI** | `task-master` | Task planning and management |
+| **GSD** | `gsd` | Spec-driven autonomous coding agent — uses existing AI provider keys |
 
 ## System Tools
 

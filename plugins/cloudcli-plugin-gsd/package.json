@@ -1,0 +1,20 @@
+{
+  "name": "cloudcli-plugin-gsd",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "GSD autonomous coding agent plugin for CloudCLI UI",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.14.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0"
+  }
+}

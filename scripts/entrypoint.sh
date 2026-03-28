@@ -3,7 +3,7 @@ set -e
 
 # ==============================================================================
 # HolyClaude — Container Entrypoint
-# Handles: UID/GID remapping, first-boot bootstrap, s6-overlay handoff
+# Handles: UID/GID remapping, host config import, first-boot bootstrap, s6 handoff
 # ==============================================================================
 
 CLAUDE_USER="claude"
@@ -32,24 +32,120 @@ chown "$PUID:$PGID" "$CLAUDE_HOME"
 chown "$PUID:$PGID" "$CLAUDE_HOME/.claude" 2>/dev/null || true
 
 # ---------- Ensure /workspace is writable ----------
-# Docker creates missing bind-mount directories as root on the host.
-# Fix the top-level workspace ownership here so the mapped claude user can write.
 mkdir -p "$WORKSPACE_DIR"
 if ! runuser -u "$CLAUDE_USER" -- test -w "$WORKSPACE_DIR"; then
     echo "[entrypoint] /workspace is not writable for $CLAUDE_USER — attempting ownership fix"
     chown "$PUID:$PGID" "$WORKSPACE_DIR" 2>/dev/null || true
 fi
-
 if ! runuser -u "$CLAUDE_USER" -- test -w "$WORKSPACE_DIR"; then
     echo "[entrypoint] WARNING: /workspace is still not writable; fix host ownership or PUID/PGID"
 fi
 
-# ---------- Pre-create ~/.claude.json as a FILE ----------
-# If this does not exist before Docker mounts, Docker creates it as a DIRECTORY
-if [ ! -f "$CLAUDE_HOME/.claude.json" ]; then
-    echo "[entrypoint] Pre-creating ~/.claude.json"
+# ==============================================================================
+# Host config import — copy from read-only /mnt/host-* into writable locations
+# Only copies when source exists. Container dirs are fully writable.
+# ==============================================================================
+
+# --- Claude Code auth ---
+if [ -f /mnt/host-claude.json ]; then
+    cp /mnt/host-claude.json "$CLAUDE_HOME/.claude.json"
+    chown "$PUID:$PGID" "$CLAUDE_HOME/.claude.json"
+    echo "[entrypoint] Copied Claude Code auth from host"
+elif [ ! -f "$CLAUDE_HOME/.claude.json" ]; then
     echo '{"hasCompletedOnboarding":true,"installMethod":"native"}' > "$CLAUDE_HOME/.claude.json"
     chown "$PUID:$PGID" "$CLAUDE_HOME/.claude.json"
+    echo "[entrypoint] Created default ~/.claude.json"
+fi
+
+# --- GSD config (skip projects/sessions — they contain host paths) ---
+GSD_DIR="$CLAUDE_HOME/.gsd"
+mkdir -p "$GSD_DIR"
+if [ -d /mnt/host-gsd ]; then
+    for f in .env preferences.md defaults.json; do
+        [ -f "/mnt/host-gsd/$f" ] && cp "/mnt/host-gsd/$f" "$GSD_DIR/$f"
+    done
+    for d in standards skills; do
+        [ -d "/mnt/host-gsd/$d" ] && cp -r "/mnt/host-gsd/$d" "$GSD_DIR/"
+    done
+    # Copy agent auth (login credentials)
+    if [ -d /mnt/host-gsd/agent ]; then
+        mkdir -p "$GSD_DIR/agent"
+        [ -f /mnt/host-gsd/agent/auth.json ] && cp /mnt/host-gsd/agent/auth.json "$GSD_DIR/agent/auth.json"
+    fi
+    echo "[entrypoint] Copied GSD config from host"
+fi
+echo '{"devRoot":"/workspace"}' > "$GSD_DIR/web-preferences.json"
+# Ensure GSD projects dir is writable (bind-mounted from host)
+chown "$PUID:$PGID" "$GSD_DIR/projects" 2>/dev/null || true
+chown -R "$PUID:$PGID" "$GSD_DIR"
+
+# --- OpenAI Codex auth ---
+CODEX_DIR="$CLAUDE_HOME/.codex"
+mkdir -p "$CODEX_DIR"
+if [ -f /mnt/host-codex/auth.json ]; then
+    cp /mnt/host-codex/auth.json "$CODEX_DIR/auth.json"
+    echo "[entrypoint] Copied Codex auth from host"
+fi
+chown -R "$PUID:$PGID" "$CODEX_DIR"
+
+# --- Gemini auth ---
+GEMINI_DIR="$CLAUDE_HOME/.gemini"
+mkdir -p "$GEMINI_DIR"
+if [ -f /mnt/host-gemini/google_accounts.json ]; then
+    cp /mnt/host-gemini/google_accounts.json "$GEMINI_DIR/google_accounts.json"
+    echo "[entrypoint] Copied Gemini auth from host"
+fi
+chown -R "$PUID:$PGID" "$GEMINI_DIR"
+
+# --- GSD Web placeholder config (real token written by gsd-web.sh at startup) ---
+cat > /tmp/gsd-web-config.json <<GEOF
+{
+  "token": "",
+  "port": ${GSD_HOST_PORT:-3002},
+  "domain": "${GSD_DOMAIN:-}"
+}
+GEOF
+chown "$PUID:$PGID" /tmp/gsd-web-config.json
+chmod 666 /tmp/gsd-web-config.json
+echo "[entrypoint] Created GSD Web config placeholder"
+
+# --- Skillshare (initialize inside container, not from host) ---
+SKILLSHARE_DIR="$CLAUDE_HOME/.config/skillshare"
+mkdir -p "$SKILLSHARE_DIR/skills" "$SKILLSHARE_DIR/extras"
+cat > "$SKILLSHARE_DIR/config.yaml" <<SEOF
+source: $CLAUDE_HOME/.config/skillshare/skills
+extras_source: $CLAUDE_HOME/.config/skillshare/extras
+mode: merge
+targets:
+  claude:
+    path: $CLAUDE_HOME/.claude/skills
+    mode: symlink
+  pi:
+    path: $CLAUDE_HOME/.agents/skills
+    mode: symlink
+  universal:
+    path: $CLAUDE_HOME/.agents/skills
+    mode: symlink
+ignore:
+  - '**/.DS_Store'
+  - '**/.git/**'
+audit:
+  block_threshold: CRITICAL
+SEOF
+chown -R "$PUID:$PGID" "$SKILLSHARE_DIR"
+echo "[entrypoint] Initialized skillshare config"
+
+# ---------- CloudCLI: ensure plugins exist in persistent volume ----------
+CLOUDCLI_DIR="$CLAUDE_HOME/.claude-code-ui"
+CLOUDCLI_SRC="/usr/local/share/holyclaude/cloudcli-plugins"
+if [ ! -f "$CLOUDCLI_DIR/plugins.json" ]; then
+    echo "[entrypoint] Initializing CloudCLI plugins in persistent volume..."
+    mkdir -p "$CLOUDCLI_DIR"
+    if [ -d "$CLOUDCLI_SRC" ]; then
+        cp -r "$CLOUDCLI_SRC/plugins" "$CLOUDCLI_DIR/"
+        cp "$CLOUDCLI_SRC/plugins.json" "$CLOUDCLI_DIR/"
+    fi
+    chown -R "$PUID:$PGID" "$CLOUDCLI_DIR"
 fi
 
 # ---------- Ensure DISPLAY is set ----------

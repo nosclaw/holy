@@ -32,14 +32,18 @@ fi
 cp "$SOURCE_DIR/claude-memory-${VARIANT}.md" "$CLAUDE_HOME/.claude/CLAUDE.md"
 echo "[bootstrap] Copied CLAUDE.md (${VARIANT} variant)"
 
-# ---------- Pre-create ~/.claude.json ----------
-cat > "$CLAUDE_HOME/.claude.json" <<'EOF'
+# ---------- Pre-create ~/.claude.json (skip if bind-mounted from host) ----------
+if [ -s "$CLAUDE_HOME/.claude.json" ]; then
+    echo "[bootstrap] ~/.claude.json already exists (likely bind-mounted) — skipping"
+else
+    cat > "$CLAUDE_HOME/.claude.json" <<'EOF'
 {
   "hasCompletedOnboarding": true,
   "installMethod": "native"
 }
 EOF
-echo "[bootstrap] Created ~/.claude.json"
+    echo "[bootstrap] Created ~/.claude.json"
+fi
 
 # ---------- Git configuration ----------
 GIT_USER_NAME="${GIT_USER_NAME:-HolyClaude User}"
@@ -49,9 +53,28 @@ runuser -u "$CLAUDE_USER" -- git config --global user.name "$GIT_USER_NAME"
 runuser -u "$CLAUDE_USER" -- git config --global user.email "$GIT_USER_EMAIL"
 echo "[bootstrap] Configured git as '$GIT_USER_NAME <$GIT_USER_EMAIL>'"
 
+# ---------- Nosclaw dev-env setup ----------
+DEV_ENV_REPO="${DEV_ENV_REPO:-https://github.com/nosclaw/dev-env.git}"
+DEV_ENV_DIR="/tmp/nosclaw-dev-env"
+
+if [ -n "$DEV_ENV_REPO" ]; then
+    echo "[bootstrap] Cloning nosclaw/dev-env..."
+    if git clone --depth 1 "$DEV_ENV_REPO" "$DEV_ENV_DIR" 2>/dev/null; then
+        echo "[bootstrap] Running nosclaw dev-env setup.sh..."
+        runuser -u "$CLAUDE_USER" -- env HOME="$CLAUDE_HOME" bash "$DEV_ENV_DIR/setup.sh" || \
+            echo "[bootstrap] WARNING: dev-env setup.sh had errors — continuing"
+        # Ensure skills are synced after setup
+        runuser -u "$CLAUDE_USER" -- env HOME="$CLAUDE_HOME" skillshare sync 2>/dev/null || true
+        rm -rf "$DEV_ENV_DIR"
+        echo "[bootstrap] Nosclaw dev-env setup complete"
+    else
+        echo "[bootstrap] WARNING: Could not clone dev-env repo — skipping"
+    fi
+fi
+
 # ---------- Fix ownership ----------
 chown -R "$PUID:$PGID" "$CLAUDE_HOME/.claude"
-chown "$PUID:$PGID" "$CLAUDE_HOME/.claude.json"
+chown "$PUID:$PGID" "$CLAUDE_HOME/.claude.json" 2>/dev/null || true
 
 # ---------- Create sentinel ----------
 touch "$CLAUDE_HOME/.claude/.holyclaude-bootstrapped"
