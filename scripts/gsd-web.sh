@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# HolyClaude — GSD Web Launcher
+# HolyClaude — GSD Web Launcher (with Dynamic Token Refresh)
 # Starts `gsd --web` on 127.0.0.1:3002, then runs a proxy on 0.0.0.0:3003
 # to make it accessible from outside the container via Docker port mapping.
 # ==============================================================================
@@ -9,6 +9,7 @@ GSD_INTERNAL_PORT=3002
 GSD_PROXY_PORT=3003
 EXTERNAL_PORT="${GSD_HOST_PORT:-$GSD_PROXY_PORT}"
 CONFIG_FILE="/tmp/gsd-web-config.json"
+GSD_LOG="/tmp/gsd-web.log"
 
 echo "[gsd-web] Starting gsd --web --port $GSD_INTERNAL_PORT in /workspace..."
 
@@ -20,27 +21,48 @@ ORIGINS="http://localhost:${EXTERNAL_PORT},http://127.0.0.1:${EXTERNAL_PORT}"
 [ -n "${GSD_DOMAIN:-}" ] && ORIGINS="$ORIGINS,https://${GSD_DOMAIN},http://${GSD_DOMAIN}"
 export GSD_WEB_ALLOWED_ORIGINS="$ORIGINS"
 
-# Run gsd --web (it starts server on 127.0.0.1 then exits)
-OUTPUT=$(cd /workspace && gsd --web --port "$GSD_INTERNAL_PORT" 2>&1)
-echo "$OUTPUT"
-
-# Extract token
-TOKEN=$(echo "$OUTPUT" | grep -oP '#token=\K[a-f0-9]+' | head -1)
-if [ -n "$TOKEN" ]; then
-    cat > "$CONFIG_FILE" <<EOF
+# --- Token Refresher (Background Loop) ---
+# This monitors the log file for #token=... and updates the config file.
+refresh_token() {
+    echo "[gsd-web-refresher] Token monitor started"
+    touch "$GSD_LOG"
+    # Wait for the log to have something
+    tail -f "$GSD_LOG" | while read -r line; do
+        if [[ "$line" == *"#token="* ]]; then
+            NEW_TOKEN=$(echo "$line" | grep -oP '#token=\K[a-f0-9]+' | head -1)
+            if [ -n "$NEW_TOKEN" ]; then
+                cat > "$CONFIG_FILE" <<EOF
 {
-  "token": "$TOKEN",
+  "token": "$NEW_TOKEN",
   "port": $EXTERNAL_PORT,
   "domain": "${GSD_DOMAIN:-}"
 }
 EOF
-    echo "[gsd-web] Token captured (port=$EXTERNAL_PORT, domain=${GSD_DOMAIN:-none})"
-else
-    echo "[gsd-web] WARNING: Could not capture token"
-fi
+                echo "[gsd-web-refresher] New token captured: ${NEW_TOKEN:0:8}..."
+                # Also set it for current shell just in case
+                export GSD_TOKEN="$NEW_TOKEN"
+            fi
+        fi
+    done
+}
 
-# Wait for GSD server
-sleep 2
+# Start refresher in background
+refresh_token &
+REFRESHER_PID=$!
+
+# Run gsd --web and pipe output to log (using stdbuf for real-time)
+# Ensure we are in /workspace for gsd to find project context
+stdbuf -oL -eL bash -c "cd /workspace && gsd --web --port $GSD_INTERNAL_PORT" > "$GSD_LOG" 2>&1 &
+GSD_PID=$!
+
+# Wait for initial token capture
+echo "[gsd-web] Waiting for initial token..."
+for i in $(seq 1 30); do
+    [ -s "$CONFIG_FILE" ] && break
+    sleep 1
+done
+
+# Wait for GSD server to bind to port
 SERVER_PID=""
 for i in $(seq 1 10); do
     SERVER_PID=$(ss -tlnp "sport = :$GSD_INTERNAL_PORT" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | head -1)
@@ -50,10 +72,12 @@ done
 
 if [ -z "$SERVER_PID" ]; then
     echo "[gsd-web] ERROR: Server not found on port $GSD_INTERNAL_PORT"
+    kill $REFRESHER_PID 2>/dev/null || true
+    kill $GSD_PID 2>/dev/null || true
     exit 1
 fi
 
-echo "[gsd-web] Server on 127.0.0.1:$GSD_INTERNAL_PORT (PID=$SERVER_PID)"
+echo "[gsd-web] GSD Backend (PID=$SERVER_PID) is ready"
 echo "[gsd-web] Starting proxy on 0.0.0.0:$GSD_PROXY_PORT..."
 
 # Proxy: 0.0.0.0:3003 → 127.0.0.1:3002
