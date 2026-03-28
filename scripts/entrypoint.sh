@@ -154,6 +154,24 @@ if [ ! -f "$CLOUDCLI_DIR/plugins.json" ]; then
     chown -R "$PUID:$PGID" "$CLOUDCLI_DIR"
 fi
 
+# --- gsd-pi dynamic update ---
+if [ -n "$GSD_PI_VERSION" ] && [ "$GSD_PI_VERSION" != "none" ]; then
+    CURRENT_V=$(gsd -v 2>/dev/null | grep -oP 'v\K[0-9.]+')
+    if [ "$GSD_PI_VERSION" = "latest" ] || [ "$GSD_PI_VERSION" != "$CURRENT_V" ]; then
+        echo "[entrypoint] Updating gsd-pi to $GSD_PI_VERSION (current: $CURRENT_V)..."
+        npm install -g "gsd-pi@$GSD_PI_VERSION" --silent
+        # Re-fix node-pty (it often needs a fresh build in its standalone dir)
+        PI_WEB_DIR="/usr/local/lib/node_modules/gsd-pi/dist/web/standalone"
+        if [ -d "$PI_WEB_DIR" ]; then
+            cd "$PI_WEB_DIR" && npm install node-pty --silent
+        fi
+    fi
+fi
+
+# --- Fix permissions for terminal updates ---
+# Allow claude user to manage global npm packages without EACCES
+chown -R "$PUID:$PGID" /usr/local/lib/node_modules /usr/local/bin
+
 # --- Dynamic GSD plugin integration ---
 # Example: GSD_PLUGIN_REPO=https://github.com/nosclaw/holy.git
 #          GSD_PLUGIN_SUBDIR=plugins/cloudcli-plugin-gsd
